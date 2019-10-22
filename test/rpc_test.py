@@ -1,9 +1,11 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import concurrent.futures
+from datetime import timedelta
 import sys
 import unittest
 from collections import namedtuple
+import time
 from unittest import mock
 
 import torch
@@ -105,6 +107,9 @@ def my_complex_tensor_function(list_input, tensor_class_input, dict_input):
         res += v
     complex_tensors = tensor_class_input.tensors
     return (res, complex_tensors[0], complex_tensors[1], complex_tensors[2])
+
+def timeout_function(timeout):
+    time.sleep(timeout)
 
 
 def my_rref_function(rref_a, rref_b):
@@ -340,6 +345,21 @@ class RpcTest(object):
         self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
 
     @dist_init
+    def test_future_timer(self):
+        fut = rpc.rpc_async(
+            "worker{}".format((self.rank + 1) % self.world_size),
+            timeout_function,
+            args=(3,)
+        )
+        time.sleep(1)
+        self.assertTrue(fut.check_time_elapsed(timedelta(seconds=0)))
+        self.assertFalse(fut.check_time_elapsed(timedelta(seconds=100)))
+        # after waiting, check_time_elapsed should never return True, since the future has completed.
+        fut.wait()
+        self.assertFalse(fut.check_time_elapsed(timedelta(seconds=0)))
+
+
+    @dist_init
     def test_nonzero(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -571,7 +591,6 @@ class RpcTest(object):
         self.assertEqual(ret, torch.ones(2, 2) + 1)
 
     def _stress_test_rpc(self, f, repeat=1000, args=()):
-        import time
 
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -835,6 +854,12 @@ class RpcTest(object):
 
         ret = ret_rref
         self.assertEqual(ret, torch.add(torch.ones(n, n), 1))
+
+    @dist_init
+    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
+    def test_timeout_set(self):
+        rpc_timeout_seconds = rpc.get_rpc_timeout().seconds
+        self.assertEqual(rpc_timeout_seconds, 100)
 
     @dist_init
     def test_remote_same_worker(self):
