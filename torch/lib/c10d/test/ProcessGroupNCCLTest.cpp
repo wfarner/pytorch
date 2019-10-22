@@ -414,6 +414,11 @@ void testReduceScatter(const std::string& path, int rank, int size) {
 }
 
 int main(int argc, char** argv) {
+  if (!at::cuda::is_available()) {
+    // skip the test
+    std::cout << "CUDA not available, skipping test" << std::endl;
+    return EXIT_SUCCESS;
+  }
   // Use WORLD_SIZE and RANK environmental variables to do multi-node
   // distributed testing
   auto sizeEnv = std::getenv("WORLD_SIZE");

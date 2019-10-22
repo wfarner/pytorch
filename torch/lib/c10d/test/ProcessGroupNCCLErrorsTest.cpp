@@ -73,18 +73,27 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
 
 class ProcessGroupNCCLErrorsTest : public ::testing::Test {
  protected:
-  bool skipTest() {
+  std::pair<bool, std::string> skipTest() {
     if (cudaNumDevices() == 0) {
-      return true;
+      return std::make_pair(true, "Skipping test since CUDA is not available");
     }
 #ifdef USE_C10D_NCCL
-    return torch::cuda::nccl::version() < kNcclErrorHandlingVersion;
+    return torch::cuda::nccl::version() < kNcclErrorHandlingVersion
+        ? std::make_pair(true, "Skipping test since NCCL version is too old")
+        : std::make_pair(false, "");
 #else
-    return false;
+    return std::make_pair(false, "");
 #endif
   }
 
   void SetUp() override {
+    bool skip;
+    std::string skipReason;
+    std::tie(skip, skipReason) = skipTest();
+    if (skip) {
+      GTEST_SKIP() << skipReason;
+    }
+
     size_t numDevices = cudaNumDevices();
     TemporaryFile file;
     store_ = std::make_shared<::c10d::FileStore>(file.path, 1);
@@ -106,10 +115,6 @@ class ProcessGroupNCCLErrorsTest : public ::testing::Test {
 };
 
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
-  if (skipTest()) {
-    return;
-  }
-
   ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
   ProcessGroupNCCLSimulateErrors pg(store_, 0, 1);
 
@@ -141,10 +146,6 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
 }
 
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
-  if (skipTest()) {
-    return;
-  }
-
   ProcessGroupNCCLSimulateErrors pg(store_, 0, 1);
 
   auto work = pg.allreduce(tensors_);
